@@ -17,7 +17,7 @@ fn main() -> Result<()> {
 }
 
 fn part1(input: &Vec<usize>) -> Result<usize> {
-    Ok(intcode(&input, 49, 49)?)
+    Ok(intcode(&input, 12, 2)?)
 }
 
 fn part2(input: &Vec<usize>) -> Result<usize> {
