@@ -7,7 +7,7 @@ fn main() -> Result<()> {
     io::stdin().read_to_string(&mut input)?;
 
     let input: Vec<usize> = input
-        .split(",")
+        .split(',')
         .map(|s| s.parse::<usize>().unwrap())
         .collect();
 
@@ -16,14 +16,14 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn part1(input: &Vec<usize>) -> Result<usize> {
+fn part1(input: &[usize]) -> Result<usize> {
     Ok(intcode(&input, 12, 2)?)
 }
 
-fn part2(input: &Vec<usize>) -> Result<usize> {
+fn part2(input: &[usize]) -> Result<usize> {
     for noun in 0..99 {
         for verb in 0..99 {
-            if intcode(input, noun, verb)? == 19690720 {
+            if intcode(input, noun, verb)? == 19_690_720 {
                 return Ok(100 * noun + verb);
             }
         }
@@ -35,18 +35,13 @@ fn part2(input: &Vec<usize>) -> Result<usize> {
     ))
 }
 
-fn intcode(input: &Vec<usize>, noun: usize, verb: usize) -> Result<usize> {
-    let mut input = input.clone();
+fn intcode(input: &[usize], noun: usize, verb: usize) -> Result<usize> {
+    let mut input: Vec<usize> = input.to_vec().clone();
     input[1] = noun;
     input[2] = verb;
     let mut intcode;
     for pos in (0..input.len()).step_by(4) {
-        intcode = (
-            input[pos + 0],
-            input[pos + 1],
-            input[pos + 2],
-            input[pos + 3],
-        );
+        intcode = (input[pos], input[pos + 1], input[pos + 2], input[pos + 3]);
         match intcode.0 {
             1 => input[intcode.3] = input[intcode.1] + input[intcode.2],
             2 => input[intcode.3] = input[intcode.1] * input[intcode.2],
