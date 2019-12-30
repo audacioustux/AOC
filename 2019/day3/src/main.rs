@@ -1,7 +1,7 @@
-use std::collections::BTreeMap;
+// use std::collections::BTreeMap;
 use std::error::Error;
 use std::io::{self, Read};
-use std::ops::Bound::Included;
+// use std::ops::Bound::Included;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -9,143 +9,113 @@ fn main() -> Result<()> {
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
 
-    let path_1 = &mut parse_input(&input)[0];
-    let path_2 = &mut parse_input(&input)[1];
+    let path_1 = &mut parse_input(&input)?[0];
+    let path_2 = &mut parse_input(&input)?[1];
 
-    let mut section_points: Vec<Point> =
-        intersections(&mut path_1.h_segments, &mut path_2.v_segments);
+    let intersections: Intersections = find_sections([&path_1, &path_2]);
 
-    section_points.append(&mut intersections(
-        &mut path_2.h_segments,
-        &mut path_1.v_segments,
-    ));
-
-    println!("{}", part1(&mut section_points));
-
+    println!("{:#?}", path_1);
+    
     Ok(())
 }
 
-fn part1(points: &mut Vec<Point>) -> isize {
-    let manhattan_distances: Vec<isize> = points
-        .iter()
-        .map(|point| manhattan_distance(&point))
-        .collect();
-
-    *manhattan_distances.iter().min().unwrap()
+#[derive(Debug)]
+struct IndexedPoints {
+    x: Vec<(i64, usize)>, // Horizontal
+    y: Vec<(i64, usize)> // Vertical
 }
-
-fn manhattan_distance(point: &Point) -> isize {
-    point.x.abs() + point.y.abs()
-}
-
-fn intersections(h_segments: &mut Vec<HSegment>, v_segments: &mut Vec<VSegment>) -> Vec<Point> {
-    let mut section_points: Vec<Point> = Vec::new();
-
-    let mut y_btree_map = BTreeMap::new();
-    for (i, h_seg) in h_segments.iter().enumerate() {
-        y_btree_map.insert(h_seg.y, i);
-    }
-    for v_seg in v_segments {
-        for (&y, &h_seg_i) in y_btree_map.range((
-            Included(&(v_seg.start_y - v_seg.len)),
-            Included(&v_seg.start_y),
-        )) {
-            let h_seg_range = std::ops::Range {
-                start: h_segments[h_seg_i].start_x,
-                end: h_segments[h_seg_i].start_x + h_segments[h_seg_i].len,
-            };
-            if h_seg_range.contains(&v_seg.x) {
-                section_points.push(Point { y: y, x: v_seg.x });
+impl IndexedPoints {
+    fn new (path: &Vec<Point>) -> Self {
+        let mut points: IndexedPoints = IndexedPoints { x: Vec::new(), y: Vec::new() };
+    
+        for (i, point) in path[1..].iter().enumerate() {
+            match point.direction {
+                Direction::Left | Direction::Right => {
+                    points.x.push((point.x, i));
+                },
+                Direction::Down | Direction::Up => {
+                    points.y.push((point.y, i));
+                },
+                _ => unreachable!()
             }
         }
+    
+        points.sort_by_axis();
+    
+        points
     }
-    section_points
+
+    fn sort_by_axis (&mut self) {
+        self.x.sort_unstable_by_key(|p| p.0);
+        self.y.sort_unstable_by_key(|p| p.0);
+    }
 }
 
-#[derive(Debug)]
-struct Segments {
-    h_segments: Vec<HSegment>,
-    v_segments: Vec<VSegment>,
+
+struct StepCount (u64, u64);
+type Intersections = Vec<(Point, StepCount)>;
+
+fn find_sections(paths: [&Vec<Point>; 2]) -> Intersections {
+    let mut intersections: Intersections = Vec::new();
+
+    let paths = vec![IndexedPoints::new(&paths[0]), IndexedPoints::new(&paths[1])];
+
+    println!("{:#?}", paths);
+    intersections
 }
 
-#[derive(Debug)]
-struct HSegment {
-    y: isize,
-    start_x: isize,
-    len: isize,
-}
-#[derive(Debug)]
-struct VSegment {
-    x: isize,
-    start_y: isize,
-    len: isize,
-}
+fn parse_input(input: &str) -> Result<[Vec<Point>; 2]> {
+    let mut input_iter = input.lines();
+    
+    let mut parsed = || to_points(input_iter.next().unwrap().trim()).unwrap();
 
-fn parse_input(input: &str) -> Vec<Segments> {
-    input
-        .lines()
-        .map(|path| to_segments(path.trim()).unwrap())
-        .collect()
+    Ok([parsed(), parsed()])
 }
 
 #[derive(Debug)]
 struct Point {
-    x: isize,
-    y: isize,
+    x: i64,
+    y: i64,
+    direction: Direction,
+    steps: u64
 }
-fn to_segments(input: &str) -> Result<Segments> {
-    let mut h_segments: Vec<HSegment> = Vec::new();
-    let mut v_segments: Vec<VSegment> = Vec::new();
 
-    let mut curr_pos = Point { x: 0, y: 0 };
+impl Point {
+    fn next(&self, step: &Step) -> Self {
+        let Point {x,y, steps, ..} = *self;
+
+        let Step {direction, distance} = *step;
+
+        let steps = steps + distance;
+
+        match direction {
+            Direction::Right => Point {x: x + distance as i64, y, direction, steps},
+            Direction::Left => Point {x: x - distance as i64, y, direction, steps},
+            Direction::Up => Point {x, y: y + distance as i64, direction, steps},
+            Direction::Down => Point {x, y: y - distance as i64, direction, steps},
+            _ => unreachable!()
+        }
+    }
+}
+
+fn to_points(input: &str) -> Result<Vec<Point>> {
+    let mut points = vec![Point { x: 0, y: 0, direction: Direction::Origin, steps: 0 }];
+
     for step in input.split(',') {
         let step = parse_step(step).unwrap();
-        match step.direction {
-            Direction::Right => {
-                h_segments.push(HSegment {
-                    y: curr_pos.y,
-                    start_x: curr_pos.x,
-                    len: step.distance,
-                });
-                curr_pos.x += step.distance;
-            }
-            Direction::Left => {
-                curr_pos.x -= step.distance;
-                h_segments.push(HSegment {
-                    y: curr_pos.y,
-                    start_x: curr_pos.x,
-                    len: step.distance,
-                })
-            }
-            Direction::Up => {
-                curr_pos.y += step.distance;
-                v_segments.push(VSegment {
-                    x: curr_pos.x,
-                    start_y: curr_pos.y,
-                    len: step.distance,
-                });
-            }
-            Direction::Down => {
-                v_segments.push(VSegment {
-                    x: curr_pos.x,
-                    start_y: curr_pos.y,
-                    len: step.distance,
-                });
-                curr_pos.y -= step.distance;
-            }
-        };
+        points.push(points.last().unwrap().next(&step))
     }
-    Ok(Segments {
-        h_segments,
-        v_segments,
-    })
+
+    Ok(points)
 }
 
+#[derive(Debug, Copy, Clone)]
 enum Direction {
     Up,
     Down,
     Left,
     Right,
+    Origin
 }
 impl Direction {
     pub fn from_chr(chr: char) -> Result<Direction> {
@@ -167,12 +137,12 @@ impl Direction {
 
 struct Step {
     direction: Direction,
-    distance: isize,
+    distance: u64,
 }
 fn parse_step(step: &str) -> Result<Step> {
     let chr = step.chars().nth(0).unwrap();
     let direction = Direction::from_chr(chr)?;
-    let distance = step[1..].parse::<isize>()?;
+    let distance = step[1..].parse::<u64>()?;
     Ok(Step {
         direction,
         distance,
