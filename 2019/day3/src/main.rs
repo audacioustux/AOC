@@ -18,120 +18,122 @@ fn main() -> Result<()> {
 }
 
 #[derive(Debug)]
-struct IndexedPoints {
-    x: Vec<(i64, usize)>, // Horizontal
-    y: Vec<(i64, usize)>, // Vertical
+struct IndexedVector {
+    horizontal: Vec<(i64, usize)>,
+    vertical: Vec<(i64, usize)>,
 }
-impl IndexedPoints {
-    fn new(path: &[Point]) -> Self {
-        let mut vector: IndexedPoints = IndexedPoints {
-            x: Vec::new(),
-            y: Vec::new(),
+impl IndexedVector {
+    fn new(path: &[Vector]) -> Self {
+        let mut i_vector: IndexedVector = IndexedVector {
+            horizontal: Vec::new(),
+            vertical: Vec::new(),
         };
-        for (i, point) in path[1..].iter().enumerate() {
-            match point.direction {
+        for (i, vector) in path[1..].iter().enumerate() {
+            match vector.direction {
                 Direction::Left | Direction::Right => {
-                    vector.x.push((point.x, i));
+                    i_vector.horizontal.push((vector.to.x, i));
                 }
                 Direction::Down | Direction::Up => {
-                    vector.y.push((point.y, i));
+                    i_vector.vertical.push((vector.to.y, i));
                 }
                 _ => unreachable!(),
             }
         }
         // sort by axis
-        vector.x.sort_unstable_by_key(|p| p.0);
-        vector.y.sort_unstable_by_key(|p| p.0);
-        vector
+        i_vector.horizontal.sort_unstable_by_key(|p| p.0);
+        i_vector.vertical.sort_unstable_by_key(|p| p.0);
+        i_vector
     }
 }
 
 #[derive(Debug)]
 struct StepCount(u64, u64); // steps taken to reach intersection by each path
 
+type VecIntersections = Vec<(Point, StepCount)>;
+
 #[derive(Debug)]
-struct Intersections {
-    vector: Vec<(Point, StepCount)>,
+struct PathIntersections {
+    points: VecIntersections,
     between_wire_i: (usize, usize),
 }
 
-fn find_intersections(paths: &[Vec<Point>]) -> Vec<Intersections> {
-    let mut intersections_by_paths: Vec<Intersections> = Vec::with_capacity(paths.len());
+fn find_intersections(paths: &[Vec<Vector>]) -> Vec<PathIntersections> {
+    let mut intersections_by_paths: Vec<PathIntersections> = Vec::with_capacity(paths.len());
 
     // sorted indexed vector of all paths
-    let paths_indexed_points: Vec<IndexedPoints> =
-        paths.iter().map(|path| IndexedPoints::new(&path)).collect();
+    let indexed_vectors_all: Vec<IndexedVector> =
+        paths.iter().map(|path| IndexedVector::new(&path)).collect();
 
-    for (path_no, path) in paths_indexed_points[..paths_indexed_points.len()]
+    for (path_no, path) in indexed_vectors_all[..indexed_vectors_all.len()]
         .iter()
         .enumerate()
     {
-        for (path_other_no, path_other) in paths_indexed_points[path_no + 1..].iter().enumerate() {
-            let mut intersections: Vec<(Point, StepCount)> = Vec::new();
-            // let mut x_btree: BTreeMap<i64, usize> = BTreeMap::new();
-            let mut y_btree: BTreeMap<i64, usize> = BTreeMap::new();
-            let mut path_x_ipoints = path.x.iter();
-            let mut path_other_y_ipoints = path_other.y.iter().peekable();
-
+        for (path_other_no, path_other) in indexed_vectors_all[path_no + 1..].iter().enumerate() {
             let path_other_no = path_other_no + 1;
-            let path_other_points = &paths[path_other_no];
-            while let Some(other_y_ipoint) = path_other_y_ipoints.next() {
-                let y_point: &Point = &path_other_points[other_y_ipoint.1 + 1];
-                while let Some(x_ipoint) = path_x_ipoints.next() {
-                    if x_ipoint.0 < y_point.x {
-                        let x_point: &Point = &paths[path_no][x_ipoint.1];
-                        y_btree.entry(x_point.y).or_insert(x_ipoint.1);
+            let mut intersections: VecIntersections = Vec::new();
+            // outer loop horizontal vector y value
+            let mut path_v_btree: BTreeMap<i64, usize> = BTreeMap::new();
+            let mut path_h_ivectors = path.horizontal.iter();
+            let mut path_other_v_ivectors = path_other.vertical.iter().peekable();
+
+            let path_other_vectors = &paths[path_other_no];
+            let path_vectors = &paths[path_no];
+            // find intersections of vertical vectors (inner loop) with horizontal vectors (outer loop)
+            while let Some(other_v_ivector) = path_other_v_ivectors.next() {
+                let v_vector: &Vector = &path_other_vectors[other_v_ivector.1 + 1];
+                // populate y values of horizontal vectors (outer loop) in path_v_btree
+                while let Some(h_ivector) = path_h_ivectors.next() {
+                    if h_ivector.0 < v_vector.to.x {
+                        let h_vector: &Vector = &paths[path_no][h_ivector.1];
+                        path_v_btree.entry(h_vector.to.y).or_insert(h_ivector.1 + 1);
                     } else {
                         break;
                     }
                 }
 
-                if let Some(other_y_ipoint_next) = path_other_y_ipoints.peek() {
-                    for (&path_x_y, &path_x_i) in
-                        y_btree.range(other_y_ipoint.0..other_y_ipoint_next.0)
+                if let Some(other_v_ivector_next) = path_other_v_ivectors.peek() {
+                    for (&path_h_y, &path_h_i) in
+                        path_v_btree.range(other_v_ivector.0..other_v_ivector_next.0)
                     {
-                        let x_point = &paths[path_no][path_x_i + 1];
-                        let from_y_point = &path_other_points[other_y_ipoint.1];
-                        let last_y_steps = {
-                            match y_point.direction {
-                                Direction::Down => path_x_y - from_y_point.y,
-                                Direction::Up => from_y_point.y - path_x_y,
-                                _ => unreachable!(),
-                            }
-                        } + y_point.steps as i64;
+                        let h_vector = &paths[path_no][path_h_i];
 
-                        let from_x_point = &paths[path_no][path_x_i];
-                        let last_x_steps = {
-                            match x_point.direction {
-                                Direction::Left => from_x_point.x - y_point.x,
-                                Direction::Right => y_point.x - from_y_point.y,
+                        let last_v_steps = {
+                            match v_vector.direction {
+                                Direction::Down => path_h_y - other_v_ivector_next.0,
+                                Direction::Up => other_v_ivector_next.0 - path_h_y,
                                 _ => unreachable!(),
                             }
-                        } + from_x_point.steps as i64;
+                        } + v_vector.steps as i64;
+
+                        let from_h_vector = &path_vectors[path_h_i - 1];
+                        let last_h_steps = {
+                            match h_vector.direction {
+                                Direction::Left => from_h_vector.to.x - v_vector.to.x,
+                                Direction::Right => v_vector.to.x - from_h_vector.to.x,
+                                _ => unreachable!(),
+                            }
+                        } + from_h_vector.steps as i64;
                         intersections.push((
                             Point {
-                                x: y_point.x,
-                                y: x_point.y,
-                                direction: Direction::Unit,
-                                steps: (last_y_steps + last_x_steps) as u64,
+                                x: v_vector.to.x,
+                                y: h_vector.to.y,
                             },
-                            StepCount(last_y_steps as u64, last_x_steps as u64),
+                            StepCount(last_v_steps as u64, last_h_steps as u64),
                         ))
                     }
                 }
             }
-            intersections_by_paths.push(Intersections {
-                vector: intersections,
+            intersections_by_paths.push(PathIntersections {
+                points: intersections,
                 between_wire_i: (path_no, path_other_no),
             });
-            // println!("{:#?}", intersections);
         }
     }
 
     intersections_by_paths
 }
 
-fn parse_input(input: &str) -> Result<Vec<Vec<Point>>> {
+fn parse_input(input: &str) -> Result<Vec<Vec<Vector>>> {
     Ok(input
         .lines()
         .map(|path| to_points(path.trim()).unwrap())
@@ -139,16 +141,25 @@ fn parse_input(input: &str) -> Result<Vec<Vec<Point>>> {
 }
 
 #[derive(Debug)]
-struct Point {
-    x: i64,
-    y: i64,
+struct Vector {
+    to: Point,
     direction: Direction,
     steps: u64,
 }
 
-impl Point {
+#[derive(Debug)]
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+impl Vector {
     fn next(&self, step: &Step) -> Self {
-        let Point { x, y, steps, .. } = *self;
+        let Vector {
+            to: Point { x, y },
+            steps,
+            ..
+        } = *self;
 
         let Step {
             direction,
@@ -158,27 +169,35 @@ impl Point {
         let steps = steps + distance;
 
         match direction {
-            Direction::Right => Point {
-                x: x + distance as i64,
-                y,
+            Direction::Right => Vector {
+                to: Point {
+                    x: x + distance as i64,
+                    y,
+                },
                 direction,
                 steps,
             },
-            Direction::Left => Point {
-                x: x - distance as i64,
-                y,
+            Direction::Left => Vector {
+                to: Point {
+                    x: x - distance as i64,
+                    y,
+                },
                 direction,
                 steps,
             },
-            Direction::Up => Point {
-                x,
-                y: y + distance as i64,
+            Direction::Up => Vector {
+                to: Point {
+                    x,
+                    y: y + distance as i64,
+                },
                 direction,
                 steps,
             },
-            Direction::Down => Point {
-                x,
-                y: y - distance as i64,
+            Direction::Down => Vector {
+                to: Point {
+                    x,
+                    y: y - distance as i64,
+                },
                 direction,
                 steps,
             },
@@ -187,10 +206,9 @@ impl Point {
     }
 }
 
-fn to_points(input: &str) -> Result<Vec<Point>> {
-    let mut vector = vec![Point {
-        x: 0,
-        y: 0,
+fn to_points(input: &str) -> Result<Vec<Vector>> {
+    let mut vector = vec![Vector {
+        to: Point { x: 0, y: 0 },
         direction: Direction::Unit,
         steps: 0,
     }];
