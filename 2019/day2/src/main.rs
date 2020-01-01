@@ -36,7 +36,7 @@ fn part2(input: &[usize]) -> Result<usize> {
 }
 
 fn intcode(input: &[usize], noun: usize, verb: usize) -> Result<usize> {
-    let mut input: Vec<usize> = input.to_vec().clone();
+    let mut input: Vec<usize> = input.to_vec();
     input[1] = noun;
     input[2] = verb;
     let mut intcode;
