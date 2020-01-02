@@ -18,15 +18,15 @@ fn main() -> Result<()> {
 }
 
 #[derive(Debug)]
-struct IndexedVector {
-    horizontal: Vec<(i64, usize)>,
-    vertical: Vec<(i64, usize)>,
+struct IndexedVectors<'a> {
+    horizontal: &'a Vec<(i64, usize)>,
+    vertical: &'a Vec<(i64, usize)>,
 }
-impl IndexedVector {
-    fn new(path: &[Vector]) -> Self {
-        let mut i_vector: IndexedVector = IndexedVector {
-            horizontal: Vec::new(),
-            vertical: Vec::new(),
+impl IndexedVectors<'_> {
+    fn new(path: &Vec<Vector>) -> Self {
+        let mut i_vector: IndexedVectors = IndexedVectors {
+            horizontal: &Vec::new(),
+            vertical: &Vec::new(),
         };
         for (i, vector) in path[1..].iter().enumerate() {
             match vector.direction {
@@ -44,6 +44,71 @@ impl IndexedVector {
         i_vector.vertical.sort_unstable_by_key(|p| p.0);
         i_vector
     }
+    fn find_intersections(&self, paths: PathPair) -> VecIntersections {
+        let mut intersections: VecIntersections = Vec::new();
+        let PathPair {
+            vertical: path_v,
+            horizontal: path_h,
+        } = paths;
+        let Self {
+            vertical,
+            horizontal,
+        } = self;
+        // outer loop horizontal vector y value
+        let mut v_btree: BTreeMap<i64, usize> = BTreeMap::new();
+        let mut h_ivectors = horizontal.iter();
+        let mut v_ivectors = vertical.iter().peekable();
+
+        // find intersections of vertical vectors (inner loop) with horizontal vectors (outer loop)
+        while let Some(v_ivector) = v_ivectors.next() {
+            let v_vector: &Vector = &path_v[v_ivector.1 + 1];
+            // populate y values of horizontal vectors (outer loop) in path_v_btree
+            while let Some(h_ivector) = h_ivectors.next() {
+                if h_ivector.0 < v_vector.to.x {
+                    let h_vector: &Vector = &path_h[h_ivector.1];
+                    v_btree.entry(h_vector.to.y).or_insert(h_ivector.1 + 1);
+                } else {
+                    break;
+                }
+            }
+
+            if let Some(other_v_ivector_next) = v_ivectors.peek() {
+                for (&path_h_y, &path_h_i) in v_btree.range(v_ivector.0..other_v_ivector_next.0) {
+                    let h_vector = &path_h[path_h_i];
+
+                    let last_v_steps = {
+                        match v_vector.direction {
+                            Direction::Down => path_h_y - other_v_ivector_next.0,
+                            Direction::Up => other_v_ivector_next.0 - path_h_y,
+                            _ => unreachable!(),
+                        }
+                    } + v_vector.steps as i64;
+
+                    let from_h_vector = &path_h[path_h_i - 1];
+                    let last_h_steps = {
+                        match h_vector.direction {
+                            Direction::Left => from_h_vector.to.x - v_vector.to.x,
+                            Direction::Right => v_vector.to.x - from_h_vector.to.x,
+                            _ => unreachable!(),
+                        }
+                    } + from_h_vector.steps as i64;
+                    intersections.push((
+                        Point {
+                            x: v_vector.to.x,
+                            y: h_vector.to.y,
+                        },
+                        StepCount(last_v_steps as u64, last_h_steps as u64),
+                    ))
+                }
+            }
+        }
+        intersections
+    }
+}
+
+struct PathPair<'a> {
+    horizontal: &'a Vec<Vector>,
+    vertical: &'a Vec<Vector>,
 }
 
 #[derive(Debug)]
@@ -52,17 +117,19 @@ struct StepCount(u64, u64); // steps taken to reach intersection by each path
 type VecIntersections = Vec<(Point, StepCount)>;
 
 #[derive(Debug)]
-struct PathIntersections {
-    points: VecIntersections,
+struct PathIntersections<'a> {
+    points: &'a VecIntersections,
     between_wire_i: (usize, usize),
 }
 
-fn find_intersections(paths: &[Vec<Vector>]) -> Vec<PathIntersections> {
+fn find_intersections(paths: &Vec<Vec<Vector>>) -> Vec<PathIntersections> {
     let mut intersections_by_paths: Vec<PathIntersections> = Vec::with_capacity(paths.len());
 
     // sorted indexed vector of all paths
-    let indexed_vectors_all: Vec<IndexedVector> =
-        paths.iter().map(|path| IndexedVector::new(&path)).collect();
+    let indexed_vectors_all: Vec<IndexedVectors> = paths
+        .iter()
+        .map(|path| IndexedVectors::new(&path))
+        .collect();
 
     for (path_no, path) in indexed_vectors_all[..indexed_vectors_all.len()]
         .iter()
@@ -70,61 +137,22 @@ fn find_intersections(paths: &[Vec<Vector>]) -> Vec<PathIntersections> {
     {
         for (path_other_no, path_other) in indexed_vectors_all[path_no + 1..].iter().enumerate() {
             let path_other_no = path_other_no + 1;
-            let mut intersections: VecIntersections = Vec::new();
-            // outer loop horizontal vector y value
-            let mut path_v_btree: BTreeMap<i64, usize> = BTreeMap::new();
-            let mut path_h_ivectors = path.horizontal.iter();
-            let mut path_other_v_ivectors = path_other.vertical.iter().peekable();
 
             let path_other_vectors = &paths[path_other_no];
             let path_vectors = &paths[path_no];
-            // find intersections of vertical vectors (inner loop) with horizontal vectors (outer loop)
-            while let Some(other_v_ivector) = path_other_v_ivectors.next() {
-                let v_vector: &Vector = &path_other_vectors[other_v_ivector.1 + 1];
-                // populate y values of horizontal vectors (outer loop) in path_v_btree
-                while let Some(h_ivector) = path_h_ivectors.next() {
-                    if h_ivector.0 < v_vector.to.x {
-                        let h_vector: &Vector = &paths[path_no][h_ivector.1];
-                        path_v_btree.entry(h_vector.to.y).or_insert(h_ivector.1 + 1);
-                    } else {
-                        break;
-                    }
-                }
 
-                if let Some(other_v_ivector_next) = path_other_v_ivectors.peek() {
-                    for (&path_h_y, &path_h_i) in
-                        path_v_btree.range(other_v_ivector.0..other_v_ivector_next.0)
-                    {
-                        let h_vector = &paths[path_no][path_h_i];
+            let p_h_po_v_pair = IndexedVectors {
+                vertical: path_other.vertical,
+                horizontal: path.horizontal,
+            };
 
-                        let last_v_steps = {
-                            match v_vector.direction {
-                                Direction::Down => path_h_y - other_v_ivector_next.0,
-                                Direction::Up => other_v_ivector_next.0 - path_h_y,
-                                _ => unreachable!(),
-                            }
-                        } + v_vector.steps as i64;
+            let intersections = p_h_po_v_pair.find_intersections(PathPair {
+                vertical: path_other_vectors,
+                horizontal: path_vectors,
+            });
 
-                        let from_h_vector = &path_vectors[path_h_i - 1];
-                        let last_h_steps = {
-                            match h_vector.direction {
-                                Direction::Left => from_h_vector.to.x - v_vector.to.x,
-                                Direction::Right => v_vector.to.x - from_h_vector.to.x,
-                                _ => unreachable!(),
-                            }
-                        } + from_h_vector.steps as i64;
-                        intersections.push((
-                            Point {
-                                x: v_vector.to.x,
-                                y: h_vector.to.y,
-                            },
-                            StepCount(last_v_steps as u64, last_h_steps as u64),
-                        ))
-                    }
-                }
-            }
             intersections_by_paths.push(PathIntersections {
-                points: intersections,
+                points: &intersections,
                 between_wire_i: (path_no, path_other_no),
             });
         }
