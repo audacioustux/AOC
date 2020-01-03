@@ -18,31 +18,32 @@ fn main() -> Result<()> {
 }
 
 #[derive(Debug)]
-struct IndexedVectors<'a> {
-    horizontal: &'a Vec<(i64, usize)>,
-    vertical: &'a Vec<(i64, usize)>,
+struct IndexedVectors {
+    horizontal: Vec<(i64, usize)>,
+    vertical: Vec<(i64, usize)>,
 }
-impl IndexedVectors<'_> {
+impl IndexedVectors {
     fn new(path: &Vec<Vector>) -> Self {
-        let mut i_vector: IndexedVectors = IndexedVectors {
-            horizontal: &Vec::new(),
-            vertical: &Vec::new(),
-        };
+        let mut horizontal = Vec::new();
+        let mut vertical = Vec::new();
         for (i, vector) in path[1..].iter().enumerate() {
             match vector.direction {
                 Direction::Left | Direction::Right => {
-                    i_vector.horizontal.push((vector.to.x, i));
+                    horizontal.push((vector.to.x, i));
                 }
                 Direction::Down | Direction::Up => {
-                    i_vector.vertical.push((vector.to.y, i));
+                    vertical.push((vector.to.y, i));
                 }
                 _ => unreachable!(),
             }
         }
         // sort by axis
-        i_vector.horizontal.sort_unstable_by_key(|p| p.0);
-        i_vector.vertical.sort_unstable_by_key(|p| p.0);
-        i_vector
+        horizontal.sort_unstable_by_key(|p| p.0);
+        vertical.sort_unstable_by_key(|p| p.0);
+        IndexedVectors {
+            horizontal: horizontal,
+            vertical: vertical,
+        }
     }
     fn find_intersections(&self, paths: PathPair) -> VecIntersections {
         let mut intersections: VecIntersections = Vec::new();
@@ -78,8 +79,8 @@ impl IndexedVectors<'_> {
 
                     let last_v_steps = {
                         match v_vector.direction {
-                            Direction::Down => path_h_y - other_v_ivector_next.0,
-                            Direction::Up => other_v_ivector_next.0 - path_h_y,
+                            Direction::Down => v_ivector.0 - path_h_y,
+                            Direction::Up => path_h_y - v_ivector.0,
                             _ => unreachable!(),
                         }
                     } + v_vector.steps as i64;
@@ -106,6 +107,7 @@ impl IndexedVectors<'_> {
     }
 }
 
+#[derive(Debug)]
 struct PathPair<'a> {
     horizontal: &'a Vec<Vector>,
     vertical: &'a Vec<Vector>,
@@ -117,8 +119,8 @@ struct StepCount(u64, u64); // steps taken to reach intersection by each path
 type VecIntersections = Vec<(Point, StepCount)>;
 
 #[derive(Debug)]
-struct PathIntersections<'a> {
-    points: &'a VecIntersections,
+struct PathIntersections {
+    points: VecIntersections,
     between_wire_i: (usize, usize),
 }
 
@@ -126,38 +128,50 @@ fn find_intersections(paths: &Vec<Vec<Vector>>) -> Vec<PathIntersections> {
     let mut intersections_by_paths: Vec<PathIntersections> = Vec::with_capacity(paths.len());
 
     // sorted indexed vector of all paths
-    let indexed_vectors_all: Vec<IndexedVectors> = paths
+    let mut indexed_vectors_all: Vec<IndexedVectors> = paths
         .iter()
         .map(|path| IndexedVectors::new(&path))
         .collect();
 
-    for (path_no, path) in indexed_vectors_all[..indexed_vectors_all.len()]
-        .iter()
-        .enumerate()
-    {
-        for (path_other_no, path_other) in indexed_vectors_all[path_no + 1..].iter().enumerate() {
-            let path_other_no = path_other_no + 1;
+    let (iv, o_iv) = indexed_vectors_all.split_at_mut(1);
+    let IndexedVectors {
+        vertical: o_vertical,
+        horizontal: o_horizontal,
+    } = &o_iv[0];
 
-            let path_other_vectors = &paths[path_other_no];
-            let path_vectors = &paths[path_no];
+    let IndexedVectors {
+        vertical,
+        horizontal,
+    } = &iv[0];
 
-            let p_h_po_v_pair = IndexedVectors {
-                vertical: path_other.vertical,
-                horizontal: path.horizontal,
-            };
+    let p_h_po_v_pair = IndexedVectors {
+        vertical: o_vertical.to_vec(),
+        horizontal: horizontal.to_vec(),
+    };
 
-            let intersections = p_h_po_v_pair.find_intersections(PathPair {
-                vertical: path_other_vectors,
-                horizontal: path_vectors,
-            });
+    let intersections = p_h_po_v_pair.find_intersections(PathPair {
+        vertical: &paths[1],
+        horizontal: &paths[0],
+    });
 
-            intersections_by_paths.push(PathIntersections {
-                points: &intersections,
-                between_wire_i: (path_no, path_other_no),
-            });
-        }
-    }
+    let p_v_po_h_pair = IndexedVectors {
+        vertical: vertical.to_vec(),
+        horizontal: o_horizontal.to_vec(),
+    };
 
+    let intersectionas = p_v_po_h_pair.find_intersections(PathPair {
+        vertical: &paths[0],
+        horizontal: &paths[1],
+    });
+
+    intersections_by_paths.push(PathIntersections {
+        points: intersections,
+        between_wire_i: (0, 1),
+    });
+    intersections_by_paths.push(PathIntersections {
+        points: intersectionas,
+        between_wire_i: (1, 0),
+    });
     intersections_by_paths
 }
 
